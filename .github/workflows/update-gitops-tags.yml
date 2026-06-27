@@ -1,0 +1,71 @@
+name: update-gitops-tags
+
+on:
+  workflow_run:
+    workflows: ["build-support-oidc-proxy"]
+    branches: [main, staging, prod]
+    types: [completed]
+
+jobs:
+  update-gitops-tags:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Download digests artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: image-digests
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: /tmp/digests
+
+      - name: Read SHA8
+        id: sha8
+        run: echo "sha8=$(cat /tmp/digests/sha8.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Read branch
+        id: branch
+        run: echo "branch=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.GITOPS_TAGS_DEPLOY_KEY }}
+
+      - name: Checkout gitops-tags
+        uses: actions/checkout@v6
+        with:
+          repository: lunarauthority/gitops-tags
+          ssh-key: ${{ secrets.GITOPS_TAGS_DEPLOY_KEY }}
+          ref: ${{ steps.branch.outputs.branch }}
+          path: gitops-tags
+
+      - name: Update support-oidc-proxy image tag
+        working-directory: gitops-tags
+        run: |
+          SHA8="${{ steps.sha8.outputs.sha8 }}"
+          mkdir -p support-oidc-proxy
+          yq e ".proxy.image.tag = \"${SHA8}\"" -i support-oidc-proxy/tags.yaml
+
+      - name: Commit and push with retry
+        working-directory: gitops-tags
+        run: |
+          SHA8="${{ steps.sha8.outputs.sha8 }}"
+          git config user.name "ci-bot"
+          git config user.email "ci@lunarauthority.github"
+          git add support-oidc-proxy/tags.yaml
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "ci: update support-oidc-proxy image to ${SHA8} [skip ci]"
+
+          BRANCH="${{ steps.branch.outputs.branch }}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${BRANCH}" && git push origin "${BRANCH}" && echo "Push succeeded on attempt ${attempt}" && exit 0
+            echo "Push failed on attempt ${attempt}"
+            sleep $((attempt == 1 ? 5 : attempt == 2 ? 15 : 30))
+          done
+          echo "Push failed after 3 attempts — manual rerun required"
+          exit 1
