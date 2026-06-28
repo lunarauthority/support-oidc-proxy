@@ -48,6 +48,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		issued.preferredUsername,
 		issued.email,
 		issued.displayName,
+		issued.givenName,
+		issued.familyName,
 		issued.nonce,
 		idTokenTTL,
 	)

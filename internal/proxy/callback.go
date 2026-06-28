@@ -4,9 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
+
+// splitName splits a display name into given (first) and family (last) parts.
+// If name contains a space, everything before the last space is given_name and
+// everything after is family_name. If name has no space, both fields are set to
+// the whole value so OpenProject can create the account without a blank field.
+func splitName(name string) (given, family string) {
+	if i := strings.LastIndex(name, " "); i > 0 {
+		return strings.TrimSpace(name[:i]), strings.TrimSpace(name[i+1:])
+	}
+	return name, name
+}
 
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -63,6 +75,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		PreferredUsername string `json:"preferred_username"`
 		Email             string `json:"email"`
 		Name              string `json:"name"`
+		GivenName         string `json:"given_name"`
+		FamilyName        string `json:"family_name"`
 	}
 	if err := idToken.Claims(&upstreamClaims); err != nil {
 		slog.Error("upstream claims extraction failed", "err", err)
@@ -71,11 +85,22 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Derive given_name/family_name: prefer explicit claims from upstream, fall
+	// back to splitting the display name so OpenProject can create an account
+	// without a blank last-name field.
+	givenName := upstreamClaims.GivenName
+	familyName := upstreamClaims.FamilyName
+	if givenName == "" || familyName == "" {
+		givenName, familyName = splitName(upstreamClaims.Name)
+	}
+
 	proxyCode := s.states.storeCode(&issuedCode{
 		kanidmUUID:        idToken.Subject,
 		preferredUsername: upstreamClaims.PreferredUsername,
 		email:             upstreamClaims.Email,
 		displayName:       upstreamClaims.Name,
+		givenName:         givenName,
+		familyName:        familyName,
 		nonce:             pending.clientNonce,
 	})
 

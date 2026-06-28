@@ -25,6 +25,8 @@ type issuedCode struct {
 	preferredUsername string
 	email             string
 	displayName       string
+	givenName         string
+	familyName        string
 	nonce             string
 	expiry            time.Time
 }

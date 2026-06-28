@@ -52,7 +52,7 @@ func (k *signingKey) JWKS() *jose.JSONWebKeySet {
 	}
 }
 
-func (k *signingKey) IssueIDToken(issuer, subject, audience, preferredUsername, email, displayName, nonce string, ttl time.Duration) (string, error) {
+func (k *signingKey) IssueIDToken(issuer, subject, audience, preferredUsername, email, displayName, givenName, familyName, nonce string, ttl time.Duration) (string, error) {
 	sig, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.ES256, Key: k.priv},
 		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", k.kid),
@@ -71,6 +71,8 @@ func (k *signingKey) IssueIDToken(issuer, subject, audience, preferredUsername, 
 		"preferred_username": preferredUsername,
 		"email":              email,
 		"name":               displayName,
+		"given_name":         givenName,
+		"family_name":        familyName,
 	}
 	if nonce != "" {
 		claims["nonce"] = nonce
